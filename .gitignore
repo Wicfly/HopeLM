@@ -1,0 +1,4 @@
+node_modules/
+.env
+.cursor/
+memory_with_embeddings.json

@@ -1,0 +1,16 @@
+{
+  "name": "hope-portfolio-rag",
+  "version": "1.0.0",
+  "description": "Minimal RAG chat for portfolio website",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "generate-embeddings": "node generateEmbeddings.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "openai": "^4.73.0"
+  }
+}
