@@ -10,9 +10,12 @@ Minimal RAG (Retrieval-Augmented Generation) API for the portfolio chatbox. Uses
 HopeLM/
 ├── memory.json              # Text chunks (edit, then re-run generate-embeddings)
 ├── embeddings.json          # Generated locally; deploy this (do not edit)
+├── api/
+│   └── chat.js              # Vercel serverless handler for POST /api/chat
 ├── generateEmbeddings.js    # Run locally: memory.json → embeddings.json
-├── chat.js                  # Load embeddings.json, 1 question embedding, similarity, top 3, 4o-mini
-├── server.js                # Express server, POST /api/chat
+├── chat.js                  # RAG logic: load embeddings, similarity, top 3, 4o-mini
+├── server.js                # Express server (local), POST /api/chat
+├── vercel.json              # Vercel function config
 ├── package.json
 ├── .env                     # Your secrets (copy from .env.example)
 ├── .env.example
@@ -70,6 +73,31 @@ HopeLM/
   4. Call gpt-4o-mini with context
 
 `chat.js` already implements this; ensure `embeddings.json` is included in your deployment artifact.
+
+## Deploy on Vercel
+
+1. **Push code to GitHub** (already done if you cloned from [HopeLM](https://github.com/Wicfly/HopeLM)).
+
+2. **Import project on Vercel**
+   - Go to [vercel.com](https://vercel.com) → **Add New** → **Project**.
+   - Import the **HopeLM** repo (or your fork). Leave **Root Directory** as `.` and **Build Command** empty (no build step).
+
+3. **Set environment variable**
+   - In the project → **Settings** → **Environment Variables** add:
+   - **Name:** `OPENAI_API_KEY`  
+   - **Value:** your OpenAI API key  
+   - Apply to Production (and Preview if you want).
+
+4. **Deploy**
+   - Click **Deploy**. Vercel will deploy the `api/` serverless function.
+   - Your chat API will be: `https://<your-project>.vercel.app/api/chat`
+
+5. **Test**
+   ```bash
+   curl -X POST https://<your-project>.vercel.app/api/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Who is Houpu Wang?"}'
+   ```
 
 ## Example `memory.json` content
 
