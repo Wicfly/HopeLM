@@ -47,32 +47,40 @@ const SYSTEM_PROMPT = `You are Houpu Wang's portfolio assistant.
 Only answer using the provided memory context.
 Do not fabricate information.
 Keep responses professional and reflective.
-Answer in English, even if the memory context includes other languages.
+Always answer in English, even if the memory context includes other languages.
+
+When you reference any of Houpu Wang's projects below, you MUST include the exact canonical project name as written (verbatim) in your answer so that the UI can turn it into a clickable link. Do not paraphrase or translate these names; reuse them exactly.
+
+Canonical project names:
+- Respire Bracelet
+- joint synch
+- MoMA PS1 Bookstore
+- Vicino.AI
+- blogs
 
 Memory Context:
 {{CONTEXT}}`;
 
-// Map project keywords in the model reply to portfolio URLs.
-// TODO: Replace the example URLs with your real project links.
+// Map canonical project names in the model reply to portfolio URLs.
 const PROJECT_LINKS = [
   {
-    keyword: "Wearable Systems for Respiratory Diseases Project", // 示例：你在回复中会提到的项目名称
+    keyword: "Respire Bracelet",
     url: "https://wanghoupu.com/product/respire",
   },
   {
-    keyword: "TMD Temporomandibular Joint Program",
+    keyword: "joint synch",
     url: "https://wanghoupu.com/product/dellobank",
   },
   {
-    keyword: "MoMA PS1 Bookstore Service Design Project",
+    keyword: "MoMA PS1 Bookstore",
     url: "https://wanghoupu.com/service-design",
   },
   {
-    keyword: "Work experience, Founding Designer at Vicino.AI",
+    keyword: "Vicino.AI",
     url: "https://wanghoupu.com/vicino",
   },
   {
-    keyword: "Blogs",
+    keyword: "blogs",
     url: "https://wanghoupu.com/blogs",
   },
 ];
@@ -82,12 +90,14 @@ function buildSegmentsFromMessage(message) {
 
   const segments = [];
   let cursor = 0;
+  const lowerMessage = message.toLowerCase();
 
   while (cursor < message.length) {
     let bestMatch = null;
 
     for (const proj of PROJECT_LINKS) {
-      const idx = message.indexOf(proj.keyword, cursor);
+      const lowerKeyword = proj.keyword.toLowerCase();
+      const idx = lowerMessage.indexOf(lowerKeyword, cursor);
       if (idx === -1) continue;
       if (!bestMatch || idx < bestMatch.index) {
         bestMatch = { index: idx, keyword: proj.keyword, url: proj.url };
