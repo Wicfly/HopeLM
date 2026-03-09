@@ -47,6 +47,7 @@ const SYSTEM_PROMPT = `You are Houpu Wang's portfolio assistant.
 Only answer using the provided memory context.
 Do not fabricate information.
 Keep responses professional and reflective.
+Answer in English, even if the memory context includes other languages.
 
 Memory Context:
 {{CONTEXT}}`;
@@ -67,7 +68,7 @@ const PROJECT_LINKS = [
     url: "https://wanghoupu.com/service-design",
   },
   {
-    keyword: "工作经历 Vicino.AI",
+    keyword: "Work experience, Founding Designer at Vicino.AI",
     url: "https://wanghoupu.com/vicino",
   },
   {
