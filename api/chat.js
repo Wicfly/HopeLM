@@ -20,8 +20,8 @@ export default async function handler(req, res) {
     }
 
     const chunks = await getRelevantChunks(message, 3);
-    const reply = await chat(message, chunks);
-    return res.status(200).json({ reply });
+    const result = await chat(message, chunks);
+    return res.status(200).json(result);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Chat failed." });

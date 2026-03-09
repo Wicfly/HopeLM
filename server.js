@@ -13,8 +13,8 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const chunks = await getRelevantChunks(message, 3);
-    const reply = await chat(message, chunks);
-    res.json({ reply });
+    const result = await chat(message, chunks);
+    res.json(result);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Chat failed." });
