@@ -18,6 +18,8 @@ const BUBBLE_RADIUS = 16
 const BUBBLE_PADDING = "8px 12px"
 /** 展开动画：0.3s，三阶贝塞尔更丝滑 */
 const EXPAND_EASING = "cubic-bezier(0.33, 1, 0.68, 1)"
+/** Bubble entrance: scale up + slide up */
+const BUBBLE_ANIMATION = "bubbleIn 0.28s cubic-bezier(0.33, 1, 0.68, 1) forwards"
 
 interface MessageSegment {
     /** 普通文本或带链接的片段；后端可按句子或词语拆分 */
@@ -82,11 +84,11 @@ export default function Chatbot(props: ChatbotProps) {
     const wrapperRef = useRef<HTMLDivElement>(null)
     const chatLogRef = useRef<HTMLDivElement>(null)
 
-    // Restore conversation from localStorage on first mount (cross-page persistence)
+    // Restore conversation from sessionStorage on first mount (persists only within same tab; cleared when re-entering site)
     useEffect(() => {
         if (typeof window === "undefined") return
         try {
-            const raw = window.localStorage.getItem(STORAGE_KEY)
+            const raw = window.sessionStorage.getItem(STORAGE_KEY)
             if (raw) {
                 const parsed = JSON.parse(raw)
                 if (Array.isArray(parsed)) {
@@ -94,17 +96,17 @@ export default function Chatbot(props: ChatbotProps) {
                 }
             }
         } catch {
-            // 忽略解析错误
+            // ignore parse errors
         }
     }, [])
 
-    // Persist conversation to localStorage when messages change
+    // Persist conversation to sessionStorage when messages change (keeps chat when navigating between subpages)
     useEffect(() => {
         if (typeof window === "undefined") return
         try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
+            window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
         } catch {
-            // 忽略写入失败（如隐私模式）
+            // ignore write errors (e.g. private mode)
         }
     }, [messages])
 
@@ -276,6 +278,11 @@ export default function Chatbot(props: ChatbotProps) {
     }
 
     return (
+        <>
+            <style>{`@keyframes bubbleIn {
+                from { opacity: 0; transform: scale(0.88) translateY(10px); }
+                to { opacity: 1; transform: scale(1) translateY(0); }
+            }`}</style>
         <div
             ref={wrapperRef}
             style={{
@@ -344,6 +351,7 @@ export default function Chatbot(props: ChatbotProps) {
                                         : { fontSize: 14 }),
                                     lineHeight: 1.45,
                                     wordBreak: "break-word",
+                                    animation: BUBBLE_ANIMATION,
                                 }}
                             >
                                 {renderMessageContent(msg)}
@@ -472,6 +480,7 @@ export default function Chatbot(props: ChatbotProps) {
                 </button>
             </div>
         </div>
+        </>
     )
 }
 
