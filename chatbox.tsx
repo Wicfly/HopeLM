@@ -4,6 +4,10 @@ import { addPropertyControls, ControlType } from "framer"
 
 const PILL_WIDTH_COLLAPSED = 225
 const PILL_WIDTH_EXPANDED = 400
+/** Mobile variant: expanded pill and chat column width */
+const MOBILE_PILL_EXPANDED = 380
+const MOBILE_PILL_COLLAPSED = 260
+const MOBILE_CHATLOG_WIDTH = 380
 const PILL_HEIGHT = 48
 const PILL_RADIUS = 32
 const CONTENT_HEIGHT = 32
@@ -68,6 +72,8 @@ interface ChatbotProps {
     suggestionChipBackground: string
     /** Chip text color */
     suggestionChipTextColor: string
+    /** Desktop vs mobile: mobile uses 380px width + keyboard lift */
+    variant?: "Desktop" | "Mobile"
     /** 胶囊背景色（带透明度） */
     pillBackground: string
     /** 占位/输入文字颜色 */
@@ -105,6 +111,7 @@ export default function Chatbot(props: ChatbotProps) {
         defaultSuggestion3 = "What was Vicino.AI like?",
         suggestionChipBackground = "rgba(255, 255, 255, 0.55)",
         suggestionChipTextColor = "#1D1D1F",
+        variant = "Desktop",
         pillBackground = "rgba(240, 240, 240, 0.65)",
         textColor = "#1D1D1F",
         sendButtonColor = "#1D1D1F",
@@ -112,6 +119,12 @@ export default function Chatbot(props: ChatbotProps) {
         inputFont,
     } = props
 
+    const isMobile = variant === "Mobile"
+    const pillExpandedW = isMobile ? MOBILE_PILL_EXPANDED : PILL_WIDTH_EXPANDED
+    const pillCollapsedW = isMobile ? MOBILE_PILL_COLLAPSED : PILL_WIDTH_COLLAPSED
+    const chatLogWidth = isMobile ? MOBILE_CHATLOG_WIDTH : CHATLOG_WIDTH
+
+    const [keyboardOffset, setKeyboardOffset] = useState(0)
     const [messages, setMessages] = useState<Message[]>([])
     const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>(() =>
         [defaultSuggestion1, defaultSuggestion2, defaultSuggestion3].filter(
@@ -189,6 +202,34 @@ export default function Chatbot(props: ChatbotProps) {
             // ignore
         }
     }, [suggestedPrompts])
+
+    // Mobile: lift entire chat above the virtual keyboard using Visual Viewport API
+    useEffect(() => {
+        if (!isMobile || typeof window === "undefined") {
+            setKeyboardOffset(0)
+            return
+        }
+        const vv = window.visualViewport
+        if (!vv) return
+
+        const updateInset = () => {
+            const inset = window.innerHeight - vv.height - vv.offsetTop
+            setKeyboardOffset(Math.max(0, inset))
+        }
+
+        vv.addEventListener("resize", updateInset)
+        vv.addEventListener("scroll", updateInset)
+        window.addEventListener("focusin", updateInset)
+        window.addEventListener("focusout", updateInset)
+        updateInset()
+
+        return () => {
+            vv.removeEventListener("resize", updateInset)
+            vv.removeEventListener("scroll", updateInset)
+            window.removeEventListener("focusin", updateInset)
+            window.removeEventListener("focusout", updateInset)
+        }
+    }, [isMobile])
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -451,6 +492,14 @@ export default function Chatbot(props: ChatbotProps) {
                 justifyContent: "flex-end",
                 gap: CHATLOG_GAP,
                 boxSizing: "border-box",
+                transform:
+                    isMobile && keyboardOffset > 0
+                        ? `translateY(-${keyboardOffset}px)`
+                        : undefined,
+                transition: isMobile
+                    ? "transform 0.22s ease-out"
+                    : undefined,
+                willChange: isMobile ? "transform" : undefined,
             }}
         >
             {/* ChatLog: transparent layer with bubbles, visible when there are messages */}
@@ -458,7 +507,7 @@ export default function Chatbot(props: ChatbotProps) {
                 <div
                     ref={chatLogRef}
                     style={{
-                        width: CHATLOG_WIDTH,
+                        width: chatLogWidth,
                         maxHeight: CHATLOG_MAX_HEIGHT,
                         overflowY: "auto",
                         overflowX: "hidden",
@@ -539,7 +588,7 @@ export default function Chatbot(props: ChatbotProps) {
             {expanded && suggestedPrompts.length > 0 && (
                 <div
                     style={{
-                        width: CHATLOG_WIDTH,
+                        width: chatLogWidth,
                         display: "flex",
                         flexWrap: "wrap",
                         gap: 6,
@@ -591,12 +640,10 @@ export default function Chatbot(props: ChatbotProps) {
             {/* ChatBox pill-shaped input */}
             <div
                 onClick={handleContainerClick}
-                onMouseEnter={() => setHovered(true)}
+                onMouseEnter={() => !isMobile && setHovered(true)}
                 onMouseLeave={() => setHovered(false)}
                 style={{
-                    width: expanded
-                        ? PILL_WIDTH_EXPANDED
-                        : PILL_WIDTH_COLLAPSED,
+                    width: expanded ? pillExpandedW : pillCollapsedW,
                     height: PILL_HEIGHT,
                     borderRadius: PILL_RADIUS,
                     background: pillBackground,
@@ -605,7 +652,8 @@ export default function Chatbot(props: ChatbotProps) {
                     boxSizing: "border-box",
                     padding: PILL_PADDING,
                     transition: `width 0.3s ${EXPAND_EASING}, transform 0.2s ease-out`,
-                    transform: hovered ? "scale(1.01)" : "scale(1)",
+                    transform:
+                        !isMobile && hovered ? "scale(1.01)" : "scale(1)",
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
@@ -620,9 +668,21 @@ export default function Chatbot(props: ChatbotProps) {
                 <input
                     ref={inputRef}
                     type="text"
+                    inputMode={isMobile ? "text" : undefined}
+                    enterKeyHint={isMobile ? "send" : undefined}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    onFocus={() => {
+                        if (isMobile && inputRef.current) {
+                            window.setTimeout(() => {
+                                inputRef.current?.scrollIntoView({
+                                    block: "nearest",
+                                    behavior: "smooth",
+                                })
+                            }, 280)
+                        }
+                    }}
                     placeholder={placeholder}
                     disabled={loading}
                     readOnly={!expanded}
@@ -697,6 +757,13 @@ export default function Chatbot(props: ChatbotProps) {
 }
 
 addPropertyControls(Chatbot, {
+    variant: {
+        type: ControlType.Enum,
+        title: "Layout",
+        options: ["Desktop", "Mobile"],
+        optionTitles: ["Desktop", "Mobile"],
+        defaultValue: "Desktop",
+    },
     apiUrl: {
         type: ControlType.String,
         title: "API URL",
