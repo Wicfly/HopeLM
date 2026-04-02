@@ -43,6 +43,22 @@ interface ChatbotProps {
     apiKey: string
     openaiModel: string
     placeholder: string
+    /** First-time greeting — line 1 (shown as first bubble) */
+    greetingLine1: string
+    /** First-time greeting — line 2 */
+    greetingLine2: string
+    /** First-time greeting — line 3 */
+    greetingLine3: string
+    /** Delay between greeting bubbles (ms) */
+    introStaggerMs: number
+    /** Delay between assistant reply bubbles when API returns multiple (ms) */
+    replyBubbleStaggerMs: number
+    /** CSS box-shadow for the pill (e.g. 0 8px 32px rgba(0,0,0,0.12)) */
+    pillBoxShadow: string
+    /** Stroke width around the pill (px); 0 = none */
+    pillStrokeWidth: number
+    /** Stroke color for the pill border */
+    pillStrokeColor: string
     /** 胶囊背景色（带透明度） */
     pillBackground: string
     /** 占位/输入文字颜色 */
@@ -67,6 +83,14 @@ export default function Chatbot(props: ChatbotProps) {
         apiKey = "",
         openaiModel = "gpt-3.5-turbo",
         placeholder = "Ask Hope LLM",
+        greetingLine1 = `Hi — I'm Hope (your chat twin). Nice to meet you.`,
+        greetingLine2 = `Ask me anything about my work, path, or side quests. (Real Hope reserves the right to disagree with my answers — but I'll do my best.)`,
+        greetingLine3 = `So — what's on your mind?`,
+        introStaggerMs = 480,
+        replyBubbleStaggerMs = 320,
+        pillBoxShadow = "0 8px 32px rgba(0, 0, 0, 0.08)",
+        pillStrokeWidth = 0,
+        pillStrokeColor = "rgba(0, 0, 0, 0.08)",
         pillBackground = "rgba(240, 240, 240, 0.65)",
         textColor = "#1D1D1F",
         sendButtonColor = "#1D1D1F",
@@ -83,6 +107,19 @@ export default function Chatbot(props: ChatbotProps) {
     const inputRef = useRef<HTMLInputElement>(null)
     const wrapperRef = useRef<HTMLDivElement>(null)
     const chatLogRef = useRef<HTMLDivElement>(null)
+    /** First session open with empty history: show 3-line intro only once */
+    const introShownRef = useRef(false)
+    const introTimeoutsRef = useRef<number[]>([])
+    const replyTimeoutsRef = useRef<number[]>([])
+
+    useEffect(() => {
+        return () => {
+            introTimeoutsRef.current.forEach((id) => clearTimeout(id))
+            introTimeoutsRef.current = []
+            replyTimeoutsRef.current.forEach((id) => clearTimeout(id))
+            replyTimeoutsRef.current = []
+        }
+    }, [])
 
     // Restore conversation from sessionStorage on first mount (persists only within same tab; cleared when re-entering site)
     useEffect(() => {
@@ -93,6 +130,7 @@ export default function Chatbot(props: ChatbotProps) {
                 const parsed = JSON.parse(raw)
                 if (Array.isArray(parsed)) {
                     setMessages(parsed)
+                    if (parsed.length > 0) introShownRef.current = true
                 }
             }
         } catch {
@@ -158,9 +196,45 @@ export default function Chatbot(props: ChatbotProps) {
         return () => document.removeEventListener("mousedown", onMouseDown)
     }, [])
 
+    const playIntroGreeting = () => {
+        const lines = [greetingLine1, greetingLine2, greetingLine3]
+        introTimeoutsRef.current.forEach((id) => clearTimeout(id))
+        introTimeoutsRef.current = []
+        lines.forEach((content, i) => {
+            const id = window.setTimeout(() => {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `intro-${Date.now()}-${i}`,
+                        role: "assistant" as const,
+                        content,
+                    },
+                ])
+            }, i * introStaggerMs)
+            introTimeoutsRef.current.push(id)
+        })
+    }
+
+    const expandFromCollapsed = () => {
+        setExpanded(true)
+        setChatLogVisible(true)
+        if (messages.length === 0 && !introShownRef.current) {
+            introShownRef.current = true
+            playIntroGreeting()
+        }
+        setTimeout(() => inputRef.current?.focus(), 50)
+    }
+
     const handleSend = async () => {
         const text = input.trim()
         if (!text || loading) return
+
+        // Cancel any pending intro bubbles if the user sends before they all appear
+        introTimeoutsRef.current.forEach((id) => clearTimeout(id))
+        introTimeoutsRef.current = []
+        replyTimeoutsRef.current.forEach((id) => clearTimeout(id))
+        replyTimeoutsRef.current = []
+        introShownRef.current = true
 
         const useOpenAI = Boolean(apiKey?.trim())
         const endpoint = useOpenAI
@@ -218,18 +292,10 @@ export default function Chatbot(props: ChatbotProps) {
                 })
                 if (!res.ok) throw new Error(`Request failed: ${res.status}`)
                 const data = await res.json()
-                const replyText =
-                    typeof data?.message === "string"
-                        ? data.message
-                        : typeof data?.reply === "string"
-                          ? data.reply
-                          : typeof data?.content === "string"
-                            ? data.content
-                            : ""
 
-                let segments: MessageSegment[] | undefined
-                if (Array.isArray((data as any)?.segments)) {
-                    segments = (data as any).segments
+                const normalizeSegments = (raw: unknown): MessageSegment[] | undefined => {
+                    if (!Array.isArray(raw)) return undefined
+                    return raw
                         .filter((s: any) => typeof s?.text === "string")
                         .map((s: any) => ({
                             type: s.type === "link" ? "link" : "text",
@@ -238,15 +304,54 @@ export default function Chatbot(props: ChatbotProps) {
                         }))
                 }
 
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        id: `a-${Date.now()}`,
-                        role: "assistant",
-                        content: replyText || "(no reply)",
-                        segments,
-                    },
-                ])
+                const bubbleList = (data as any)?.bubbles
+                if (Array.isArray(bubbleList) && bubbleList.length > 0) {
+                    bubbleList.forEach((b: any, i: number) => {
+                        const content =
+                            typeof b?.message === "string"
+                                ? b.message
+                                : typeof b?.text === "string"
+                                  ? b.text
+                                  : ""
+                        if (!content) return
+                        const id = window.setTimeout(() => {
+                            setMessages((prev) => [
+                                ...prev,
+                                {
+                                    id: `a-${Date.now()}-${i}`,
+                                    role: "assistant" as const,
+                                    content: content || "(no reply)",
+                                    segments: normalizeSegments(b?.segments),
+                                },
+                            ])
+                        }, i * replyBubbleStaggerMs)
+                        replyTimeoutsRef.current.push(id)
+                    })
+                } else {
+                    const replyText =
+                        typeof data?.message === "string"
+                            ? data.message
+                            : typeof data?.reply === "string"
+                              ? data.reply
+                              : typeof data?.content === "string"
+                                ? data.content
+                                : ""
+
+                    let segments: MessageSegment[] | undefined
+                    if (Array.isArray((data as any)?.segments)) {
+                        segments = normalizeSegments((data as any).segments)
+                    }
+
+                    setMessages((prev) => [
+                        ...prev,
+                        {
+                            id: `a-${Date.now()}`,
+                            role: "assistant",
+                            content: replyText || "(no reply)",
+                            segments,
+                        },
+                    ])
+                }
             }
         } catch {
             setMessages((prev) => [
@@ -264,9 +369,7 @@ export default function Chatbot(props: ChatbotProps) {
 
     const handleContainerClick = () => {
         if (!expanded) {
-            setExpanded(true)
-            if (messages.length > 0) setChatLogVisible(true)
-            setTimeout(() => inputRef.current?.focus(), 50)
+            expandFromCollapsed()
         }
     }
 
@@ -401,6 +504,11 @@ export default function Chatbot(props: ChatbotProps) {
                     alignItems: "center",
                     gap: 8,
                     flexShrink: 0,
+                    boxShadow: pillBoxShadow,
+                    border:
+                        pillStrokeWidth > 0
+                            ? `${pillStrokeWidth}px solid ${pillStrokeColor}`
+                            : "none",
                 }}
             >
                 <input
@@ -440,9 +548,7 @@ export default function Chatbot(props: ChatbotProps) {
                         e.stopPropagation()
                         if (expanded) handleSend()
                         else {
-                            setExpanded(true)
-                            if (messages.length > 0) setChatLogVisible(true)
-                            setTimeout(() => inputRef.current?.focus(), 50)
+                            expandFromCollapsed()
                         }
                     }}
                     disabled={loading || !input.trim()}
@@ -507,6 +613,61 @@ addPropertyControls(Chatbot, {
         type: ControlType.String,
         title: "Placeholder",
         defaultValue: "Ask Hope LLM",
+    },
+    greetingLine1: {
+        type: ControlType.String,
+        title: "Greeting line 1",
+        defaultValue:
+            "Hi — I'm Hope (your chat twin). Nice to meet you.",
+        displayTextArea: true,
+    },
+    greetingLine2: {
+        type: ControlType.String,
+        title: "Greeting line 2",
+        defaultValue:
+            "Ask me anything about my work, path, or side quests. (Real Hope reserves the right to disagree with my answers — but I'll do my best.)",
+        displayTextArea: true,
+    },
+    greetingLine3: {
+        type: ControlType.String,
+        title: "Greeting line 3",
+        defaultValue: "So — what's on your mind?",
+        displayTextArea: true,
+    },
+    introStaggerMs: {
+        type: ControlType.Number,
+        title: "Greeting stagger (ms)",
+        defaultValue: 480,
+        min: 120,
+        max: 2000,
+        step: 40,
+    },
+    replyBubbleStaggerMs: {
+        type: ControlType.Number,
+        title: "Reply bubble stagger (ms)",
+        defaultValue: 320,
+        min: 0,
+        max: 1500,
+        step: 40,
+    },
+    pillBoxShadow: {
+        type: ControlType.String,
+        title: "Pill shadow (CSS)",
+        defaultValue: "0 8px 32px rgba(0, 0, 0, 0.08)",
+        displayTextArea: true,
+    },
+    pillStrokeWidth: {
+        type: ControlType.Number,
+        title: "Pill stroke (px)",
+        defaultValue: 0,
+        min: 0,
+        max: 6,
+        step: 1,
+    },
+    pillStrokeColor: {
+        type: ControlType.Color,
+        title: "Pill stroke color",
+        defaultValue: "rgba(0, 0, 0, 0.08)",
     },
     pillBackground: {
         type: ControlType.Color,
