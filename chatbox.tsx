@@ -10,6 +10,7 @@ const CONTENT_HEIGHT = 32
 const SEND_BUTTON_SIZE = 32
 const PILL_PADDING = (PILL_HEIGHT - CONTENT_HEIGHT) / 2 // 8
 const STORAGE_KEY = "hope_floating_chat_messages"
+const SUGGESTIONS_STORAGE_KEY = "hope_floating_chat_suggestions"
 const CHATLOG_WIDTH = 400
 const CHATLOG_MAX_HEIGHT = 300
 const CHATLOG_GAP = 8
@@ -59,6 +60,14 @@ interface ChatbotProps {
     pillStrokeWidth: number
     /** Stroke color for the pill border */
     pillStrokeColor: string
+    /** Default chip prompts (before first API reply); shown as 3 starter questions */
+    defaultSuggestion1: string
+    defaultSuggestion2: string
+    defaultSuggestion3: string
+    /** Chip background */
+    suggestionChipBackground: string
+    /** Chip text color */
+    suggestionChipTextColor: string
     /** 胶囊背景色（带透明度） */
     pillBackground: string
     /** 占位/输入文字颜色 */
@@ -91,6 +100,11 @@ export default function Chatbot(props: ChatbotProps) {
         pillBoxShadow = "0 8px 32px rgba(0, 0, 0, 0.08)",
         pillStrokeWidth = 0,
         pillStrokeColor = "rgba(0, 0, 0, 0.08)",
+        defaultSuggestion1 = "What's your background in design?",
+        defaultSuggestion2 = "Tell me about Respire Bracelet.",
+        defaultSuggestion3 = "What was Vicino.AI like?",
+        suggestionChipBackground = "rgba(255, 255, 255, 0.55)",
+        suggestionChipTextColor = "#1D1D1F",
         pillBackground = "rgba(240, 240, 240, 0.65)",
         textColor = "#1D1D1F",
         sendButtonColor = "#1D1D1F",
@@ -99,6 +113,11 @@ export default function Chatbot(props: ChatbotProps) {
     } = props
 
     const [messages, setMessages] = useState<Message[]>([])
+    const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>(() =>
+        [defaultSuggestion1, defaultSuggestion2, defaultSuggestion3].filter(
+            (s) => s && String(s).trim()
+        )
+    )
     const [input, setInput] = useState("")
     const [expanded, setExpanded] = useState(false)
     const [chatLogVisible, setChatLogVisible] = useState(false)
@@ -121,7 +140,7 @@ export default function Chatbot(props: ChatbotProps) {
         }
     }, [])
 
-    // Restore conversation from sessionStorage on first mount (persists only within same tab; cleared when re-entering site)
+    // Restore conversation + suggestion chips from sessionStorage
     useEffect(() => {
         if (typeof window === "undefined") return
         try {
@@ -131,6 +150,17 @@ export default function Chatbot(props: ChatbotProps) {
                 if (Array.isArray(parsed)) {
                     setMessages(parsed)
                     if (parsed.length > 0) introShownRef.current = true
+                }
+            }
+            const sugRaw = window.sessionStorage.getItem(
+                SUGGESTIONS_STORAGE_KEY
+            )
+            if (sugRaw) {
+                const sp = JSON.parse(sugRaw)
+                if (Array.isArray(sp) && sp.some((x) => typeof x === "string")) {
+                    setSuggestedPrompts(
+                        sp.filter((x) => typeof x === "string" && x.trim())
+                    )
                 }
             }
         } catch {
@@ -147,6 +177,18 @@ export default function Chatbot(props: ChatbotProps) {
             // ignore write errors (e.g. private mode)
         }
     }, [messages])
+
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        try {
+            window.sessionStorage.setItem(
+                SUGGESTIONS_STORAGE_KEY,
+                JSON.stringify(suggestedPrompts)
+            )
+        } catch {
+            // ignore
+        }
+    }, [suggestedPrompts])
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -302,6 +344,17 @@ export default function Chatbot(props: ChatbotProps) {
                             text: String(s.text),
                             url: typeof s.url === "string" ? s.url : undefined,
                         }))
+                }
+
+                const apiSuggestions = (data as any)?.suggestions
+                if (Array.isArray(apiSuggestions)) {
+                    const next = apiSuggestions
+                        .filter((x: unknown) => typeof x === "string")
+                        .map((s: string) => s.trim())
+                        .filter(Boolean)
+                    if (next.length > 0) {
+                        setSuggestedPrompts(next.slice(0, 3))
+                    }
                 }
 
                 const bubbleList = (data as any)?.bubbles
@@ -479,6 +532,59 @@ export default function Chatbot(props: ChatbotProps) {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Suggested follow-up prompts (above the pill) */}
+            {expanded && suggestedPrompts.length > 0 && (
+                <div
+                    style={{
+                        width: CHATLOG_WIDTH,
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 6,
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        paddingLeft: 4,
+                        paddingRight: 4,
+                    }}
+                >
+                    {suggestedPrompts.map((label, i) => (
+                        <button
+                            key={`${label}-${i}`}
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                setInput(label)
+                                setExpanded(true)
+                                setChatLogVisible(true)
+                                setTimeout(() => inputRef.current?.focus(), 0)
+                            }}
+                            style={{
+                                maxWidth: "100%",
+                                padding: "6px 10px",
+                                borderRadius: 999,
+                                border: "1px solid rgba(0,0,0,0.08)",
+                                background: suggestionChipBackground,
+                                color: suggestionChipTextColor,
+                                fontSize: 12,
+                                lineHeight: 1.35,
+                                cursor: "pointer",
+                                textAlign: "left",
+                                ...(inputFont
+                                    ? {
+                                          fontFamily: inputFont.family,
+                                          fontWeight:
+                                              inputFont.style?.fontWeight,
+                                      }
+                                    : {}),
+                                backdropFilter: "blur(10px)",
+                                WebkitBackdropFilter: "blur(10px)",
+                            }}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </div>
             )}
 
@@ -668,6 +774,34 @@ addPropertyControls(Chatbot, {
         type: ControlType.Color,
         title: "Pill stroke color",
         defaultValue: "rgba(0, 0, 0, 0.08)",
+    },
+    defaultSuggestion1: {
+        type: ControlType.String,
+        title: "Default chip 1",
+        defaultValue: "What's your background in design?",
+        displayTextArea: true,
+    },
+    defaultSuggestion2: {
+        type: ControlType.String,
+        title: "Default chip 2",
+        defaultValue: "Tell me about Respire Bracelet.",
+        displayTextArea: true,
+    },
+    defaultSuggestion3: {
+        type: ControlType.String,
+        title: "Default chip 3",
+        defaultValue: "What was Vicino.AI like?",
+        displayTextArea: true,
+    },
+    suggestionChipBackground: {
+        type: ControlType.Color,
+        title: "Chip background",
+        defaultValue: "rgba(255, 255, 255, 0.55)",
+    },
+    suggestionChipTextColor: {
+        type: ControlType.Color,
+        title: "Chip text color",
+        defaultValue: "#1D1D1F",
     },
     pillBackground: {
         type: ControlType.Color,

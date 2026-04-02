@@ -8,8 +8,16 @@ const MEMORY_PATH = join(process.cwd(), "embeddings.json");
 
 /** Model must separate short bubbles with this exact token */
 const BUBBLE_DELIMITER = "|||BUBBLE|||";
+/** After the answer, model outputs follow-up chip questions after this token */
+const SUGGESTIONS_DELIMITER = "|||SUGGESTIONS|||";
 /** Target max words per bubble when splitting long replies */
 const MAX_WORDS_PER_BUBBLE = 30;
+
+const FALLBACK_SUGGESTIONS = [
+  "What's your background in design?",
+  "Tell me about Respire Bracelet.",
+  "What was Vicino.AI like?",
+];
 
 let memoryWithEmbeddings = null;
 
@@ -70,6 +78,13 @@ When you mention any of these projects, include the exact canonical name below (
 - MoMA PS1 Bookstore
 - Vicino.AI
 - blogs
+
+Follow-up prompts (for the website UI):
+After your last answer bubble, on a new line output EXACTLY:
+${SUGGESTIONS_DELIMITER}
+Then a JSON array of exactly 3 short English questions the visitor might ask next (conversational, under 12 words each, tied to what you just said — not generic filler). No markdown fences, only valid JSON. Example:
+${SUGGESTIONS_DELIMITER}
+["How did you prototype Respire Bracelet?", "Why focus on chronic illness?", "What's next for you?"]
 
 Memory Context:
 {{CONTEXT}}`;
@@ -151,11 +166,11 @@ function splitIntoWordBubbles(text, maxWords = MAX_WORDS_PER_BUBBLE) {
   return out;
 }
 
-function parseAssistantBubbles(raw) {
-  if (!raw || typeof raw !== "string") {
+function parseAssistantBubbles(answerText) {
+  if (!answerText || typeof answerText !== "string") {
     return ["I don't have information about that."];
   }
-  let t = raw.trim();
+  let t = answerText.trim();
   if (t.includes(BUBBLE_DELIMITER)) {
     const parts = t
       .split(BUBBLE_DELIMITER)
@@ -164,6 +179,50 @@ function parseAssistantBubbles(raw) {
     if (parts.length > 0) return parts;
   }
   return splitIntoWordBubbles(t);
+}
+
+function stripCodeFences(s) {
+  let x = s.trim();
+  if (x.startsWith("```")) {
+    x = x.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
+  }
+  return x.trim();
+}
+
+function parseSuggestionsJson(rest) {
+  const cleaned = stripCodeFences(rest);
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((x) => typeof x === "string")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 5);
+    }
+  } catch {
+    // fall through
+  }
+  return cleaned
+    .split(/\n/)
+    .map((l) => l.replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function splitAnswerAndSuggestions(raw) {
+  if (!raw || typeof raw !== "string") {
+    return { answerText: "", suggestions: [] };
+  }
+  const t = raw.trim();
+  if (!t.includes(SUGGESTIONS_DELIMITER)) {
+    return { answerText: t, suggestions: [] };
+  }
+  const idx = t.indexOf(SUGGESTIONS_DELIMITER);
+  const answerText = t.slice(0, idx).trim();
+  const rest = t.slice(idx + SUGGESTIONS_DELIMITER.length).trim();
+  const suggestions = parseSuggestionsJson(rest);
+  return { answerText, suggestions };
 }
 
 export async function chat(userMessage, contextChunks) {
@@ -179,6 +238,7 @@ export async function chat(userMessage, contextChunks) {
       message,
       segments: undefined,
       bubbles: [{ message, segments: undefined }],
+      suggestions: [...FALLBACK_SUGGESTIONS],
     };
   }
 
@@ -192,7 +252,11 @@ export async function chat(userMessage, contextChunks) {
 
   const raw =
     response.choices[0]?.message?.content?.trim() ?? "I don't have information about that.";
-  const parts = parseAssistantBubbles(raw);
+  const { answerText, suggestions: parsedSuggestions } = splitAnswerAndSuggestions(raw);
+  let parts = parseAssistantBubbles(answerText);
+  if (parts.length === 0) {
+    parts = ["I don't have information about that."];
+  }
 
   const bubbles = parts.map((text) => ({
     message: text,
@@ -201,9 +265,17 @@ export async function chat(userMessage, contextChunks) {
 
   const message = parts.join(" ");
 
+  const suggestions =
+    parsedSuggestions.length >= 3
+      ? parsedSuggestions.slice(0, 3)
+      : parsedSuggestions.length > 0
+        ? [...parsedSuggestions, ...FALLBACK_SUGGESTIONS].slice(0, 3)
+        : [...FALLBACK_SUGGESTIONS];
+
   return {
     message,
     segments: bubbles[0]?.segments,
     bubbles,
+    suggestions,
   };
 }
