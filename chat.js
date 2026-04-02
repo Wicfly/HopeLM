@@ -77,6 +77,7 @@ When you mention any of these projects, include the exact canonical name below (
 - joint synch
 - MoMA PS1 Bookstore
 - Vicino.AI
+- Tagent
 - blogs
 
 Follow-up prompts (for the website UI):
@@ -93,11 +94,11 @@ Memory Context:
 const PROJECT_LINKS = [
   {
     keyword: "Respire Bracelet",
-    url: "https://wanghoupu.com/product/respire",
+    url: "https://wanghoupu.com/work/respire",
   },
   {
     keyword: "joint synch",
-    url: "https://wanghoupu.com/product/dellobank",
+    url: "https://wanghoupu.com/work/joint",
   },
   {
     keyword: "MoMA PS1 Bookstore",
@@ -105,7 +106,11 @@ const PROJECT_LINKS = [
   },
   {
     keyword: "Vicino.AI",
-    url: "https://wanghoupu.com/vicino",
+    url: "https://wanghoupu.com/work/vicino",
+  },
+  {
+    keyword: "Tagent",
+    url: "https://wanghoupu.com/work/tagent",
   },
   {
     keyword: "blogs",
