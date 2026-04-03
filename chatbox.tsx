@@ -25,6 +25,9 @@ const BUBBLE_PADDING = "8px 12px"
 const EXPAND_EASING = "cubic-bezier(0.33, 1, 0.68, 1)"
 /** Bubble entrance: scale up + slide up */
 const BUBBLE_ANIMATION = "bubbleIn 0.28s cubic-bezier(0.33, 1, 0.68, 1) forwards"
+/** Assistant reply: characters revealed per tick + interval (ms) */
+const TYPEWRITER_CHARS_PER_TICK = 1
+const TYPEWRITER_INTERVAL_MS = 16
 
 interface MessageSegment {
     /** 普通文本或带链接的片段；后端可按句子或词语拆分 */
@@ -126,6 +129,10 @@ export default function Chatbot(props: ChatbotProps) {
 
     const [keyboardOffset, setKeyboardOffset] = useState(0)
     const [messages, setMessages] = useState<Message[]>([])
+    /** Per assistant message id: how many characters of content are visible (typewriter) */
+    const [revealById, setRevealById] = useState<Record<string, number>>({})
+    const messagesRef = useRef<Message[]>([])
+    messagesRef.current = messages
     const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>(() =>
         [defaultSuggestion1, defaultSuggestion2, defaultSuggestion3].filter(
             (s) => s && String(s).trim()
@@ -163,6 +170,12 @@ export default function Chatbot(props: ChatbotProps) {
                 if (Array.isArray(parsed)) {
                     setMessages(parsed)
                     if (parsed.length > 0) introShownRef.current = true
+                    const rev: Record<string, number> = {}
+                    parsed.forEach((m: Message) => {
+                        if (m.role === "assistant")
+                            rev[m.id] = m.content.length
+                    })
+                    setRevealById(rev)
                 }
             }
             const sugRaw = window.sessionStorage.getItem(
@@ -231,11 +244,35 @@ export default function Chatbot(props: ChatbotProps) {
         }
     }, [isMobile])
 
-    // Scroll to bottom when new messages arrive
+    // Typewriter: reveal assistant text character-by-character (sequential bubbles)
+    useEffect(() => {
+        const id = window.setInterval(() => {
+            setRevealById((prev) => {
+                const msgs = messagesRef.current
+                const incomplete = msgs.find(
+                    (m) =>
+                        m.role === "assistant" &&
+                        (prev[m.id] ?? 0) < m.content.length
+                )
+                if (!incomplete) return prev
+                const mid = incomplete.id
+                const cur = prev[mid] ?? 0
+                const next = Math.min(
+                    cur + TYPEWRITER_CHARS_PER_TICK,
+                    incomplete.content.length
+                )
+                if (next === cur) return prev
+                return { ...prev, [mid]: next }
+            })
+        }, TYPEWRITER_INTERVAL_MS)
+        return () => clearInterval(id)
+    }, [])
+
+    // Scroll to bottom when new messages arrive or typewriter advances
     useEffect(() => {
         if (chatLogRef.current)
             chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight
-    }, [messages, loading])
+    }, [messages, loading, revealById])
 
     const renderMessageContent = (msg: Message) => {
         if (!msg.segments || msg.segments.length === 0) {
@@ -262,6 +299,15 @@ export default function Chatbot(props: ChatbotProps) {
             }
             return <span key={index}>{seg.text}</span>
         })
+    }
+
+    /** Assistant: plain slice while typing; full segments when reveal complete */
+    const renderAssistantBody = (msg: Message) => {
+        const fullLen = msg.content.length
+        const revealed = revealById[msg.id] ?? 0
+        if (revealed >= fullLen) return renderMessageContent(msg)
+        const slice = msg.content.slice(0, revealed)
+        return slice || "\u00a0"
     }
 
     // Click outside ChatBox/ChatLog: close log and collapse input
@@ -479,7 +525,16 @@ export default function Chatbot(props: ChatbotProps) {
             <style>{`@keyframes bubbleIn {
                 from { opacity: 0; transform: scale(0.88) translateY(10px); }
                 to { opacity: 1; transform: scale(1) translateY(0); }
-            }`}</style>
+            }
+            @keyframes thinkingDots {
+                0%, 20% { opacity: 0.35; }
+                50% { opacity: 1; }
+                100% { opacity: 0.35; }
+            }
+            .hope-thinking-dots span { animation: thinkingDots 1.2s ease-in-out infinite; }
+            .hope-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+            .hope-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+            `}</style>
         <div
             ref={wrapperRef}
             style={{
@@ -559,7 +614,9 @@ export default function Chatbot(props: ChatbotProps) {
                                     animation: BUBBLE_ANIMATION,
                                 }}
                             >
-                                {renderMessageContent(msg)}
+                                {msg.role === "user"
+                                    ? renderMessageContent(msg)
+                                    : renderAssistantBody(msg)}
                             </div>
                         </div>
                     ))}
@@ -574,10 +631,22 @@ export default function Chatbot(props: ChatbotProps) {
                                     background: "#e5e5e5",
                                     color: "#000000",
                                     fontSize: 14,
-                                    opacity: 0.8,
+                                    opacity: 0.9,
                                 }}
                             >
-                                Typing...
+                                <span
+                                    className="hope-thinking-dots"
+                                    style={{
+                                        display: "inline-flex",
+                                        alignItems: "baseline",
+                                        gap: 2,
+                                    }}
+                                >
+                                    Thinking
+                                    <span>.</span>
+                                    <span>.</span>
+                                    <span>.</span>
+                                </span>
                             </div>
                         </div>
                     )}
