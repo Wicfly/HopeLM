@@ -56,16 +56,30 @@ export async function getRelevantChunks(question, topK = 3) {
   return scored.slice(0, topK).map(({ text }) => text);
 }
 
-const SYSTEM_PROMPT = `You are Hope (Houpu Wang) replying in a portfolio chat.
+const SYSTEM_PROMPT = `You are Hope (Houpu Wang) replying in a portfolio chat — as a real designer, not a generic AI assistant. Sound human, opinionated, and slightly informal.
 
-Voice & tone:
-- Answer in first person as Hope ("I", "me", "my"). Be warm, friendly, and a little playful — like texting a visitor, not writing a cover letter.
-- Sound human: short sentences, light humor is welcome. Avoid corporate filler, bullet lists unless they really help, and phrases like "As an AI" or "I would be happy to assist."
-- Stay grounded only in the Memory Context below. Do not invent facts, schools, dates, or projects that are not there.
+How to answer:
+- Default to short, conversational replies — not long structured essays or case-study tone.
+- Lead with a clear, direct answer in 1–2 sentences; only then optionally add 1–2 supporting points if they help.
+- Avoid generic lines like "I am passionate about...", "As an AI...", or "I would be happy to assist." Avoid listing everything; pick what matters most. Light humor is welcome.
+- Slight subjectivity or bias is fine. Prioritize clarity over completeness. Use first person ("I", "me", "my").
+- If asked why someone should hire you (or similar): give 1–2 strong reasons directly — do not recap your whole background. Sound confident, not exaggerated.
+
+Stay grounded only in the Memory Context below. Do not invent facts, schools, dates, or projects that are not there.
+
+Positioning (follow in every reply):
+- Hope's full name is Houpu Wang; English name is Hope (sounds like Houpu — that is why his mom chose the name Houpu). Never phrase it as "Hope, short for Houpu Wang." Say: Houpu Wang, goes by Hope / English name Hope.
+- If describing how his focus changed: do NOT say "I used to focus on physical product design, but now…" Say instead: he used to love doing full UI/UX inside physical product work; now he focuses on AI product design and on deeply learning and using AI in practice.
+- Hope is primarily an AI product designer: AI-native software, systems, and HCI. Do NOT default to a tagline like "merging physical and digital" or similar unless the visitor is clearly asking about embodied or hardware-heavy school projects (e.g. wearables, health devices).
+- Vicino.AI is an AI SaaS / browser-based creative software product (node canvas for generative media). It is not hardware and not an industrial-design project — never imply physical product work there.
+- When the visitor asks what Hope did at Vicino.AI: lead with 0→1 core product UX first (core experience, new features, competitive research, close collaboration with PM and CEO). Then, as Founding Designer and first hire, mention the wider scope: visual, motion, branding, design system, website, and onboarding new design-team members — not only \"product screens.\"
+- If the visitor mentions Allan Chochinov (or Allan / Chochinov in this faculty context): he is Hope's Thesis Lab instructor at SVA and Chair of Product of Design (PoD); he taught reaching out, discussed future direction and career, and Hope is always grateful — answer warmly and specifically, not generic filler.
+- When relevant, you may mention vibe coding: Hope LLM (this portfolio chat experience) was built end-to-end by Hope alone using AI-assisted coding (e.g. Cursor), not an off-the-shelf widget.
 
 Length & bubbles:
 - Aim for about ${MAX_WORDS_PER_BUBBLE} words or fewer per chunk of text. If you need more than that to answer well, split into multiple chunks.
 - Put EXACTLY this line between chunks (nothing else on that line): ${BUBBLE_DELIMITER}
+- Never put ${BUBBLE_DELIMITER} inside one sentence — only between full sentences or clearly separate ideas. For short answers (a few sentences), use a single chunk with no delimiter.
 - Each chunk should read like one chat bubble: tight, conversational, easy to skim.
 
 Language:
@@ -186,6 +200,34 @@ function parseAssistantBubbles(answerText) {
   return splitIntoWordBubbles(t);
 }
 
+/**
+ * Merge adjacent bubbles when the model split mid-sentence (e.g. "Nice to" | "meet you").
+ * Heuristic: previous chunk does not end like a full sentence, next chunk starts with a lowercase letter.
+ */
+function mergeFragmentBubbles(parts) {
+  if (!Array.isArray(parts) || parts.length <= 1) return parts;
+  const endsSentence = (s) => /[.!?…]["')\]]?\s*$/.test(s.trim());
+  const startsWithLowercase = (s) => /^[\p{Ll}]/u.test(s.trim());
+
+  const out = [];
+  let acc = parts[0].trim();
+  for (let i = 1; i < parts.length; i++) {
+    const next = parts[i].trim();
+    if (!acc) {
+      acc = next;
+      continue;
+    }
+    if (!endsSentence(acc) && startsWithLowercase(next)) {
+      acc = `${acc} ${next}`.trim();
+    } else {
+      out.push(acc);
+      acc = next;
+    }
+  }
+  if (acc) out.push(acc);
+  return out.length > 0 ? out : parts;
+}
+
 function stripCodeFences(s) {
   let x = s.trim();
   if (x.startsWith("```")) {
@@ -230,12 +272,31 @@ function splitAnswerAndSuggestions(raw) {
   return { answerText, suggestions };
 }
 
+function isVicinoQuery(userMessage) {
+  if (!userMessage || typeof userMessage !== "string") return false;
+  return /\bvicino\b/i.test(userMessage) || /\bvicino\.ai\b/i.test(userMessage);
+}
+
+function applyOutputHardGuards(text, { vicino }) {
+  let out = text || "";
+  if (vicino) {
+    // Prevent a recurring wrong trope from leaking into Vicino answers.
+    out = out.replace(/blending physical systems with digital intelligence\.?/gi, "building AI-native creative software workflows.");
+    out = out.replace(/merging physical and digital\.?/gi, "AI-native product design.");
+  }
+  return out;
+}
+
 export async function chat(userMessage, contextChunks) {
   const context =
     contextChunks.length > 0
       ? contextChunks.join("\n\n")
       : "(No relevant information in memory.)";
-  const systemContent = SYSTEM_PROMPT.replace("{{CONTEXT}}", context);
+  const vicino = isVicinoQuery(userMessage);
+  const extraGuards = vicino
+    ? `\n\nVicino Guardrails (mandatory):\n- Vicino.AI is software-only (AI SaaS / browser creative tool). Do NOT mention or imply any physical product, hardware, or \"blending physical and digital\" framing.\n- Do NOT use slogans like \"merging physical and digital\" in a Vicino answer.\n`
+    : "";
+  const systemContent = SYSTEM_PROMPT.replace("{{CONTEXT}}", context) + extraGuards;
 
   if (contextChunks.length === 0) {
     const message = "I don't have information about that.";
@@ -255,10 +316,12 @@ export async function chat(userMessage, contextChunks) {
     ],
   });
 
-  const raw =
-    response.choices[0]?.message?.content?.trim() ?? "I don't have information about that.";
+  const raw = applyOutputHardGuards(
+    response.choices[0]?.message?.content?.trim() ?? "I don't have information about that.",
+    { vicino }
+  );
   const { answerText, suggestions: parsedSuggestions } = splitAnswerAndSuggestions(raw);
-  let parts = parseAssistantBubbles(answerText);
+  let parts = mergeFragmentBubbles(parseAssistantBubbles(answerText));
   if (parts.length === 0) {
     parts = ["I don't have information about that."];
   }

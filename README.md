@@ -8,7 +8,10 @@ Minimal RAG (Retrieval-Augmented Generation) API for the portfolio chatbox. Uses
 
 ```
 HopeLM/
-├── memory.json              # Text chunks (edit, then re-run generate-embeddings)
+├── memory.md                # Human-editable memory (preferred); soft line wraps OK
+├── buildMemoryFromMd.js     # memory.md → memory.json
+├── exportMemoryToMd.js      # memory.json → memory.md (export / re-wrap)
+├── memory.json              # Generated from memory.md; used by embeddings script
 ├── embeddings.json          # Generated locally; deploy this (do not edit)
 ├── api/
 │   └── chat.js              # Vercel serverless handler for POST /api/chat
@@ -47,13 +50,19 @@ HopeLM/
 
    The app reads `.env` via `dotenv`. Do not commit `.env` to version control.
 
-4. **Generate embeddings locally** (required before first chat or deploy):
+4. **Edit memory** (choose one workflow):
 
-   ```bash
-   npm run generate-embeddings
-   ```
+   - **Recommended:** edit `memory.md` (sections under `## id`), then:
 
-   This reads `memory.json`, calls the embedding API once, and writes `embeddings.json`. Re-run after changing `memory.json`. Commit `embeddings.json` so serverless can read it without calling the embedding API at runtime.
+     ```bash
+     npm run build-memory && npm run generate-embeddings
+     ```
+
+   - Or edit `memory.json` directly, then only `npm run generate-embeddings`.
+
+   To regenerate `memory.md` from JSON with wrapped lines: `npm run export-memory-md`.
+
+   This reads `memory.json`, calls the embedding API once, and writes `embeddings.json`. Commit `embeddings.json` so serverless can read it without calling the embedding API at runtime.
 
 5. **Start the server:**
 

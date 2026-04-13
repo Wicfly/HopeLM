@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "generate-embeddings": "node generateEmbeddings.js"
+    "generate-embeddings": "node generateEmbeddings.js",
+    "build-memory": "node buildMemoryFromMd.js",
+    "export-memory-md": "node exportMemoryToMd.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

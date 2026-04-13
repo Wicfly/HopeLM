@@ -1,4 +1,4 @@
-// Framer 无背景浮层式对话：ChatLog（透明）+ ChatBox（胶囊输入）
+// Framer 浮层对话：ChatLog（可配色实心背景）+ ChatBox（胶囊输入）
 import React, { useState, useRef, useEffect } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
@@ -23,11 +23,47 @@ const BUBBLE_RADIUS = 16
 const BUBBLE_PADDING = "8px 12px"
 /** 展开动画：0.3s，三阶贝塞尔更丝滑 */
 const EXPAND_EASING = "cubic-bezier(0.33, 1, 0.68, 1)"
+/** 首次进入页面时，整块 chat UI 自中心展开的时长 */
+const CHATBOX_ENTRANCE_DURATION_S = 0.68
 /** Bubble entrance: scale up + slide up */
 const BUBBLE_ANIMATION = "bubbleIn 0.28s cubic-bezier(0.33, 1, 0.68, 1) forwards"
 /** Assistant reply: characters revealed per tick + interval (ms) */
 const TYPEWRITER_CHARS_PER_TICK = 1
 const TYPEWRITER_INTERVAL_MS = 16
+
+function luminanceFromCssColor(cssColor: string): number | null {
+    const s = cssColor.trim()
+    const hex6 = s.match(/^#([0-9a-f]{6})$/i)
+    if (hex6) {
+        const n = parseInt(hex6[1], 16)
+        const r = (n >> 16) & 255
+        const g = (n >> 8) & 255
+        const b = n & 255
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    }
+    const hex3 = s.match(/^#([0-9a-f]{3})$/i)
+    if (hex3) {
+        const h = hex3[1]
+        const r = parseInt(h[0] + h[0], 16)
+        const g = parseInt(h[1] + h[1], 16)
+        const b = parseInt(h[2] + h[2], 16)
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    }
+    const rgb = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/)
+    if (rgb) {
+        const r = +rgb[1]
+        const g = +rgb[2]
+        const b = +rgb[3]
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    }
+    return null
+}
+
+function isDarkChatLogBackground(cssColor: string): boolean {
+    const L = luminanceFromCssColor(cssColor)
+    if (L === null) return false
+    return L < 0.5
+}
 
 interface MessageSegment {
     /** 普通文本或带链接的片段；后端可按句子或词语拆分 */
@@ -85,11 +121,13 @@ interface ChatbotProps {
     sendButtonColor: string
     /** 发送按钮图标颜色 */
     sendIconColor: string
+    /** 对话区域（消息列表）背景色；浅色用黑气泡，深色背景自动切换为浅色气泡以保证对比 */
+    chatLogBackground: string
     inputFont: any
 }
 
 /**
- * Chatbot — 无背景浮层对话：ChatLog（透明+气泡）+ ChatBox 胶囊输入
+ * Chatbot — 浮层对话：ChatLog（实心背景 + 气泡）+ ChatBox 胶囊输入
  * @framerIntrinsicWidth 400
  * @framerIntrinsicHeight 360
  * @framerSupportedLayoutWidth any
@@ -119,8 +157,15 @@ export default function Chatbot(props: ChatbotProps) {
         textColor = "#1D1D1F",
         sendButtonColor = "#1D1D1F",
         sendIconColor = "#FFFFFF",
+        chatLogBackground = "#FFFFFF",
         inputFont,
     } = props
+
+    const chatLogDark = isDarkChatLogBackground(chatLogBackground)
+    const userBubbleBg = chatLogDark ? "#FFFFFF" : "#000000"
+    const userBubbleFg = chatLogDark ? "#1D1D1F" : "#FFFFFF"
+    const assistantBubbleBg = chatLogDark ? "#3A3A3C" : "#E5E5E5"
+    const assistantBubbleFg = chatLogDark ? "#FFFFFF" : "#000000"
 
     const isMobile = variant === "Mobile"
     const pillExpandedW = isMobile ? MOBILE_PILL_EXPANDED : PILL_WIDTH_EXPANDED
@@ -149,6 +194,10 @@ export default function Chatbot(props: ChatbotProps) {
     /** First session open with empty history: show 3-line intro only once */
     const introShownRef = useRef(false)
     const introTimeoutsRef = useRef<number[]>([])
+    /** Remaining greeting lines after the first (sequential typewriter) */
+    const introPendingLinesRef = useRef<string[] | null>(null)
+    /** Prevents double-append (e.g. Strict Mode) after a line finishes typing */
+    const introLastHandledCompletionIdRef = useRef<string | null>(null)
     const replyTimeoutsRef = useRef<number[]>([])
 
     useEffect(() => {
@@ -244,6 +293,38 @@ export default function Chatbot(props: ChatbotProps) {
         }
     }, [isMobile])
 
+    // After each greeting line finishes typing, append the next line from the queue
+    useEffect(() => {
+        const pending = introPendingLinesRef.current
+        if (pending === null) return
+
+        const msgs = messagesRef.current
+        const last = msgs[msgs.length - 1]
+        if (!last || last.role !== "assistant") return
+        if ((revealById[last.id] ?? 0) < last.content.length) return
+
+        if (introLastHandledCompletionIdRef.current === last.id) return
+
+        if (pending.length === 0) {
+            introPendingLinesRef.current = null
+            introLastHandledCompletionIdRef.current = last.id
+            return
+        }
+
+        introLastHandledCompletionIdRef.current = last.id
+        const [nextContent, ...rest] = pending
+        introPendingLinesRef.current = rest.length > 0 ? rest : null
+
+        setMessages((prev) => [
+            ...prev,
+            {
+                id: `intro-${Date.now()}-${prev.length}`,
+                role: "assistant" as const,
+                content: nextContent,
+            },
+        ])
+    }, [messages, revealById])
+
     // Typewriter: reveal assistant text character-by-character (sequential bubbles)
     useEffect(() => {
         const id = window.setInterval(() => {
@@ -326,22 +407,26 @@ export default function Chatbot(props: ChatbotProps) {
     }, [])
 
     const playIntroGreeting = () => {
-        const lines = [greetingLine1, greetingLine2, greetingLine3]
         introTimeoutsRef.current.forEach((id) => clearTimeout(id))
         introTimeoutsRef.current = []
-        lines.forEach((content, i) => {
-            const id = window.setTimeout(() => {
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        id: `intro-${Date.now()}-${i}`,
-                        role: "assistant" as const,
-                        content,
-                    },
-                ])
-            }, i * introStaggerMs)
-            introTimeoutsRef.current.push(id)
-        })
+
+        const lines = [greetingLine1, greetingLine2, greetingLine3].filter(
+            (s) => s && String(s).trim()
+        )
+        if (lines.length === 0) return
+
+        introLastHandledCompletionIdRef.current = null
+        const [first, ...rest] = lines
+        introPendingLinesRef.current = rest.length > 0 ? rest : null
+
+        setMessages((prev) => [
+            ...prev,
+            {
+                id: `intro-${Date.now()}-0`,
+                role: "assistant" as const,
+                content: first,
+            },
+        ])
     }
 
     const expandFromCollapsed = () => {
@@ -354,13 +439,18 @@ export default function Chatbot(props: ChatbotProps) {
         setTimeout(() => inputRef.current?.focus(), 50)
     }
 
-    const handleSend = async () => {
-        const text = input.trim()
+    /** `presetText` sends that string directly (e.g. suggestion chips) without an extra click */
+    const handleSend = async (presetText?: string) => {
+        const text = (
+            typeof presetText === "string" ? presetText : input
+        ).trim()
         if (!text || loading) return
 
         // Cancel any pending intro bubbles if the user sends before they all appear
         introTimeoutsRef.current.forEach((id) => clearTimeout(id))
         introTimeoutsRef.current = []
+        introPendingLinesRef.current = null
+        introLastHandledCompletionIdRef.current = null
         replyTimeoutsRef.current.forEach((id) => clearTimeout(id))
         replyTimeoutsRef.current = []
         introShownRef.current = true
@@ -534,6 +624,36 @@ export default function Chatbot(props: ChatbotProps) {
             .hope-thinking-dots span { animation: thinkingDots 1.2s ease-in-out infinite; }
             .hope-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
             .hope-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+            .hope-suggestion-chip {
+                transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+            }
+            .hope-suggestion-chip:hover:not(:disabled) {
+                transform: scale(1.045);
+            }
+            .hope-suggestion-chip:active:not(:disabled) {
+                transform: scale(1.02);
+            }
+            @keyframes hopeChatboxEntrance {
+                from {
+                    opacity: 0;
+                    transform: scale(0.78);
+                }
+                to {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
+            .hope-chatbox-entrance {
+                transform-origin: 50% 50%;
+                animation: hopeChatboxEntrance ${CHATBOX_ENTRANCE_DURATION_S}s ${EXPAND_EASING} forwards;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .hope-chatbox-entrance {
+                    animation: none;
+                    opacity: 1;
+                    transform: none;
+                }
+            }
             `}</style>
         <div
             ref={wrapperRef}
@@ -545,7 +665,6 @@ export default function Chatbot(props: ChatbotProps) {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "flex-end",
-                gap: CHATLOG_GAP,
                 boxSizing: "border-box",
                 transform:
                     isMobile && keyboardOffset > 0
@@ -557,7 +676,19 @@ export default function Chatbot(props: ChatbotProps) {
                 willChange: isMobile ? "transform" : undefined,
             }}
         >
-            {/* ChatLog: transparent layer with bubbles, visible when there are messages */}
+            <div
+                className="hope-chatbox-entrance"
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    gap: CHATLOG_GAP,
+                    width: "100%",
+                    boxSizing: "border-box",
+                }}
+            >
+            {/* ChatLog: conversation panel (solid background from props) */}
             {chatLogVisible && (
                 <div
                     ref={chatLogRef}
@@ -566,16 +697,17 @@ export default function Chatbot(props: ChatbotProps) {
                         maxHeight: CHATLOG_MAX_HEIGHT,
                         overflowY: "auto",
                         overflowX: "hidden",
-                        // 图层本身带轻微白色雾化，同时对背后内容做背景模糊
-                        background: "rgba(255,255,255,0.25)",
-                        backdropFilter: "blur(22px)",
-                        WebkitBackdropFilter: "blur(22px)",
+                        background: chatLogBackground,
                         borderRadius: 24,
                         padding: 8,
                         display: "flex",
                         flexDirection: "column",
                         gap: BUBBLE_GAP,
                         flexShrink: 0,
+                        boxSizing: "border-box",
+                        border: chatLogDark
+                            ? "1px solid rgba(255,255,255,0.08)"
+                            : "1px solid rgba(0,0,0,0.06)",
                     }}
                 >
                     {messages.map((msg) => (
@@ -595,12 +727,12 @@ export default function Chatbot(props: ChatbotProps) {
                                     borderRadius: BUBBLE_RADIUS,
                                     background:
                                         msg.role === "user"
-                                            ? "#000000"
-                                            : "#e5e5e5",
+                                            ? userBubbleBg
+                                            : assistantBubbleBg,
                                     color:
                                         msg.role === "user"
-                                            ? "#ffffff"
-                                            : "#000000",
+                                            ? userBubbleFg
+                                            : assistantBubbleFg,
                                     ...(inputFont
                                         ? {
                                               fontFamily: inputFont.family,
@@ -628,10 +760,10 @@ export default function Chatbot(props: ChatbotProps) {
                                 style={{
                                     padding: BUBBLE_PADDING,
                                     borderRadius: BUBBLE_RADIUS,
-                                    background: "#e5e5e5",
-                                    color: "#000000",
+                                    background: assistantBubbleBg,
+                                    color: assistantBubbleFg,
                                     fontSize: 14,
-                                    opacity: 0.9,
+                                    opacity: 0.95,
                                 }}
                             >
                                 <span
@@ -671,12 +803,11 @@ export default function Chatbot(props: ChatbotProps) {
                         <button
                             key={`${label}-${i}`}
                             type="button"
+                            className="hope-suggestion-chip"
+                            disabled={loading}
                             onClick={(e) => {
                                 e.stopPropagation()
-                                setInput(label)
-                                setExpanded(true)
-                                setChatLogVisible(true)
-                                setTimeout(() => inputRef.current?.focus(), 0)
+                                handleSend(label)
                             }}
                             style={{
                                 maxWidth: "100%",
@@ -687,7 +818,8 @@ export default function Chatbot(props: ChatbotProps) {
                                 color: suggestionChipTextColor,
                                 fontSize: 12,
                                 lineHeight: 1.35,
-                                cursor: "pointer",
+                                cursor: loading ? "not-allowed" : "pointer",
+                                opacity: loading ? 0.55 : 1,
                                 textAlign: "left",
                                 ...(inputFont
                                     ? {
@@ -819,6 +951,7 @@ export default function Chatbot(props: ChatbotProps) {
                         <path d="M18 15l-6-6-6 6" />
                     </svg>
                 </button>
+            </div>
             </div>
         </div>
         </>
@@ -957,6 +1090,11 @@ addPropertyControls(Chatbot, {
     sendIconColor: {
         type: ControlType.Color,
         title: "Send Icon",
+        defaultValue: "#FFFFFF",
+    },
+    chatLogBackground: {
+        type: ControlType.Color,
+        title: "Chat log background",
         defaultValue: "#FFFFFF",
     },
     inputFont: {
